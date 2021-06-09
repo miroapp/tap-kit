@@ -8,8 +8,7 @@ import base64
 from singer.catalog import Catalog
 from urllib.parse import urlparse, parse_qs
 
-from .streams import Stream
-from .utils import (stream_is_selected, transform_write_and_count, safe_to_iso8601,
+from .utils import (transform_write_and_count, safe_to_iso8601,
                     format_last_updated_for_request, get_res_data)
 
 LOGGER = singer.get_logger()
@@ -51,17 +50,24 @@ class TapExecutor:
             self.sync()
 
     def discover(self):
-        catalog = [stream().generate_catalog() for stream in self.streams]
+        catalog = [stream.generate_catalog() for stream in self.streams]
 
         return json.dump({'streams': catalog}, sys.stdout, indent=4)
 
     def sync(self):
         self.set_catalog()
 
-        for c in self.selected_catalog:
-            self.sync_stream(
-                Stream(config=self.config, state=self.state, catalog=c)
-            )
+        def find_catalog(stream_name):
+            for c in self.selected_catalog:
+                if c.stream == stream_name:
+                    return c
+            return None
+
+        for s in self.streams:
+            s.config = self.config
+            s.state = self.state
+            s.catalog = find_catalog(s.stream)
+            self.sync_stream(s)
 
     def sync_stream(self, stream):
         stream.write_schema()
@@ -89,8 +95,7 @@ class TapExecutor:
         self.catalog = Catalog.from_dict(self.args.properties) \
             if self.args.properties else self.discover()
 
-        self.selected_catalog = [s for s in self.catalog.streams
-                                 if stream_is_selected(s)]
+        self.selected_catalog = [s for s in self.catalog.streams]
 
     def call_full_stream(self, stream):
         """
@@ -142,13 +147,15 @@ class TapExecutor:
             if self.should_write(records, stream, last_updated):
                 transform_write_and_count(stream, records)
 
+            transformed_records = stream.execute(records)
+
             last_updated = self.get_latest_for_next_call(
-                records,
+                transformed_records,
                 stream.stream_metadata['replication-key'],
                 last_updated
             )
 
-            if self.should_update_state(records, stream):
+            if self.should_update_state(transformed_records, stream):
                 stream.update_bookmark(last_updated)
 
             request_config = self.update_for_next_call(

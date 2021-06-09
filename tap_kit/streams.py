@@ -46,6 +46,15 @@ class Stream:
             self.schema = self.catalog.schema
             self.meta_fields['replication_key'] = self.stream_metadata.get('replication-key')
 
+    def execute(self, records):
+        """
+            Execute any transformation in the record, applied at the stream level.
+
+            Returns the transformed query.
+        """
+        return records
+
+
     # ------------------------- DISCOVER MODE ------------------------- #
 
     def build_base_metadata(self, metadata):
